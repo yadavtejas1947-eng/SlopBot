@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>My Bot</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+</head>
+
+<body>
+
+    <div class="app">
+
+        <div class="header">
+
+            🤖 My Bot
+
+            <div class="status">
+                AI Assistant
+            </div>
+
+        </div>
+
+
+        <div id="chat" class="chat">
+
+            <div class="message bot">
+                Hey! I'm your AI assistant. Ask me anything.
+            </div>
+
+        </div>
+
+
+        <div class="input-area">
+
+            <input
+                id="message"
+                type="text"
+                placeholder="Message My Bot..."
+                autocomplete="off"
+            >
+
+            <button id="send">
+                Send
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <script
+        src="{{ url_for('static', filename='script.js') }}"
+    ></script>
+
+</body>
+
+</html>

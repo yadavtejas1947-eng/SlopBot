@@ -1,0 +1,211 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+
+    font-family:
+        Inter,
+        Arial,
+        sans-serif;
+
+    background: #111111;
+    color: #ffffff;
+
+    height: 100vh;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+
+/* Main app */
+
+.app {
+    width: 100%;
+    max-width: 800px;
+    height: 90vh;
+
+    background: #181818;
+
+    border: 1px solid #303030;
+    border-radius: 18px;
+
+    display: flex;
+    flex-direction: column;
+
+    overflow: hidden;
+}
+
+
+/* Header */
+
+.header {
+    padding: 18px 22px;
+
+    border-bottom: 1px solid #303030;
+
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.status {
+    margin-top: 4px;
+
+    color: #777777;
+
+    font-size: 12px;
+}
+
+
+/* Chat */
+
+.chat {
+    flex: 1;
+
+    padding: 25px;
+
+    overflow-y: auto;
+
+    display: flex;
+    flex-direction: column;
+
+    gap: 16px;
+}
+
+
+/* Messages */
+
+.message {
+    max-width: 75%;
+
+    padding: 12px 16px;
+
+    border-radius: 16px;
+
+    line-height: 1.5;
+
+    white-space: pre-wrap;
+
+    word-wrap: break-word;
+}
+
+.message.user {
+    align-self: flex-end;
+
+    background: #2563eb;
+
+    border-bottom-right-radius: 5px;
+}
+
+.message.bot {
+    align-self: flex-start;
+
+    background: #292929;
+
+    border-bottom-left-radius: 5px;
+}
+
+
+/* Input */
+
+.input-area {
+    display: flex;
+
+    gap: 10px;
+
+    padding: 15px;
+
+    border-top: 1px solid #303030;
+}
+
+#message {
+    flex: 1;
+
+    padding: 14px 16px;
+
+    border: 1px solid #333333;
+    border-radius: 12px;
+
+    outline: none;
+
+    background: #222222;
+
+    color: #ffffff;
+
+    font-size: 15px;
+}
+
+#message:focus {
+    border-color: #555555;
+}
+
+#message::placeholder {
+    color: #777777;
+}
+
+
+/* Send button */
+
+#send {
+    padding: 0 20px;
+
+    border: none;
+
+    border-radius: 12px;
+
+    background: #2563eb;
+
+    color: white;
+
+    font-size: 15px;
+
+    cursor: pointer;
+}
+
+#send:hover {
+    background: #1d4ed8;
+}
+
+#send:disabled {
+    opacity: 0.5;
+
+    cursor: not-allowed;
+}
+
+
+/* Scrollbar */
+
+.chat::-webkit-scrollbar {
+    width: 6px;
+}
+
+.chat::-webkit-scrollbar-thumb {
+    background: #444444;
+
+    border-radius: 10px;
+}
+
+
+/* Mobile */
+
+@media (max-width: 600px) {
+
+    body {
+        align-items: stretch;
+    }
+
+    .app {
+        height: 100vh;
+
+        border: none;
+
+        border-radius: 0;
+    }
+
+    .message {
+        max-width: 85%;
+    }
+}
