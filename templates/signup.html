@@ -1,42 +1,115 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
-    <title>Create Account</title>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Create Account — SlopBot</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
 </head>
 
-<body>
+<body class="auth-page">
 
-<h1>Create Account</h1>
+    <div class="auth-card">
 
-<form method="POST">
+        <div class="auth-logo">
+            S
+        </div>
 
-    <input
-        name="username"
-        placeholder="Username"
-        required
-    >
+        <h1>
+            Create your account
+        </h1>
 
-    <br><br>
+        <p class="auth-subtitle">
+            Start chatting with SlopBot.
+        </p>
 
-    <input
-        name="password"
-        type="password"
-        placeholder="Password"
-        required
-    >
 
-    <br><br>
+        {% if error %}
 
-    <button type="submit">
-        Create Account
-    </button>
+        <div class="error">
+            {{ error }}
+        </div>
 
-</form>
+        {% endif %}
 
-<p>
-    Already have an account?
-    <a href="/login">Login</a>
-</p>
+
+        <form
+            method="POST"
+            class="auth-form"
+        >
+
+            <input
+                type="hidden"
+                name="csrf_token"
+                value="{{ csrf_token }}"
+            >
+
+
+            <label for="username">
+                Username
+            </label>
+
+            <input
+                id="username"
+                name="username"
+                type="text"
+                placeholder="Choose a username"
+                minlength="3"
+                maxlength="30"
+                autocomplete="username"
+                required
+            >
+
+
+            <label for="password">
+                Password
+            </label>
+
+            <input
+                id="password"
+                name="password"
+                type="password"
+                placeholder="At least 8 characters"
+                minlength="8"
+                autocomplete="new-password"
+                required
+            >
+
+
+            <button
+                type="submit"
+                class="auth-button"
+            >
+                Create Account
+            </button>
+
+        </form>
+
+
+        <p class="auth-footer">
+
+            Already have an account?
+
+            <a href="{{ url_for('login') }}">
+                Login
+            </a>
+
+        </p>
+
+    </div>
 
 </body>
+
 </html>

@@ -1,3 +1,7 @@
-flask
+Flask
+Flask-Login
+Flask-Limiter
 openai
 python-dotenv
+gunicorn
+psycopg2-binary

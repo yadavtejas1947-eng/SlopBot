@@ -10,7 +10,12 @@
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>My Bot</title>
+    <meta
+        name="csrf-token"
+        content="{{ csrf_token }}"
+    >
+
+    <title>SlopBot</title>
 
     <link
         rel="stylesheet"
@@ -23,43 +28,104 @@
 
     <div class="app">
 
-        <div class="header">
+        <header class="header">
 
-            🤖 My Bot
+            <div class="brand">
 
-            <div class="status">
-                AI Assistant
+                <div class="logo">
+                    S
+                </div>
+
+                <div>
+
+                    <div class="brand-name">
+                        SlopBot
+                    </div>
+
+                    <div class="status">
+                        AI Assistant
+                    </div>
+
+                </div>
+
             </div>
 
-        </div>
+            <div class="account">
 
+                <span class="username">
+                    {{ username }}
+                </span>
 
-        <div id="chat" class="chat">
+                <a
+                    class="logout"
+                    href="{{ url_for('logout') }}"
+                >
+                    Logout
+                </a>
 
-            <div class="message bot">
-                Hey! I'm your AI assistant. Ask me anything.
             </div>
 
-        </div>
+        </header>
 
 
-        <div class="input-area">
+        <main
+            id="chat"
+            class="chat"
+        >
 
-            <input
-                id="message"
-                type="text"
-                placeholder="Message My Bot..."
-                autocomplete="off"
-            >
+            <div class="welcome">
 
-            <button id="send">
-                Send
-            </button>
+                <div class="welcome-icon">
+                    S
+                </div>
+
+                <h1>
+                    Hey, {{ username }}.
+                </h1>
+
+                <p>
+                    What can I help you with?
+                </p>
+
+            </div>
+
+        </main>
+
+
+        <div class="input-wrapper">
+
+            <div class="input-area">
+
+                <textarea
+                    id="message"
+                    rows="1"
+                    maxlength="10000"
+                    placeholder="Message SlopBot..."
+                    autocomplete="off"
+                ></textarea>
+
+                <button
+                    id="send"
+                    type="button"
+                    aria-label="Send message"
+                >
+                    ↑
+                </button>
+
+            </div>
+
+            <div class="input-note">
+                SlopBot can make mistakes. Check important information.
+            </div>
 
         </div>
 
     </div>
 
+
+    <script>
+        window.CSRF_TOKEN = "{{ csrf_token }}";
+    </script>
 
     <script
         src="{{ url_for('static', filename='script.js') }}"

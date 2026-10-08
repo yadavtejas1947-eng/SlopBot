@@ -1,63 +1,103 @@
 import os
+import secrets
 import sqlite3
 from datetime import datetime
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from dotenv import load_dotenv
+from flask import (
+    Flask,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for
+)
 from flask_login import (
     LoginManager,
     UserMixin,
-    login_user,
+    current_user,
     login_required,
-    logout_user,
-    current_user
+    login_user,
+    logout_user
 )
-from werkzeug.security import generate_password_hash, check_password_hash
-from dotenv import load_dotenv
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from openai import OpenAI
+from werkzeug.security import (
+    check_password_hash,
+    generate_password_hash
+)
 
 
 # =========================================================
-# SETUP
+# ENVIRONMENT
 # =========================================================
 
 load_dotenv()
 
+
+# =========================================================
+# APP
+# =========================================================
+
 app = Flask(__name__)
 
-app.secret_key = os.environ.get(
-    "FLASK_SECRET_KEY",
-    "change-this-secret-key"
+secret_key = os.environ.get("FLASK_SECRET_KEY")
+
+if not secret_key:
+    raise RuntimeError(
+        "FLASK_SECRET_KEY is not configured."
+    )
+
+app.secret_key = secret_key
+
+
+# =========================================================
+# PRODUCTION SECURITY
+# =========================================================
+
+is_production = (
+    os.environ.get("FLASK_ENV", "").lower()
+    == "production"
 )
 
-DATABASE = "chatbot.db"
-
-
-# =========================================================
-# AI CLIENT
-# =========================================================
-
-client = OpenAI(
-    api_key=os.environ["HACKCLUB_API_KEY"],
-    base_url="https://ai.hackclub.com/proxy/v1"
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=is_production,
 )
 
 
 # =========================================================
-# LOGIN SYSTEM
+# RATE LIMITING
+# =========================================================
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=[
+        "200 per day",
+        "50 per hour"
+    ],
+    storage_uri="memory://"
+)
+
+
+# =========================================================
+# LOGIN
 # =========================================================
 
 login_manager = LoginManager()
 
 login_manager.init_app(app)
 
-# Anyone trying to access a protected page gets sent here
 login_manager.login_view = "login"
 
 
 class User(UserMixin):
 
     def __init__(self, user_id, username):
-
         self.id = user_id
         self.username = username
 
@@ -65,21 +105,34 @@ class User(UserMixin):
 @login_manager.user_loader
 def load_user(user_id):
 
-    connection = sqlite3.connect(DATABASE)
-
+    connection = get_db()
     cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT id, username
-        FROM users
-        WHERE id = ?
-        """,
-        (user_id,)
-    )
+    if using_postgres():
+
+        cursor.execute(
+            """
+            SELECT id, username
+            FROM users
+            WHERE id = %s
+            """,
+            (user_id,)
+        )
+
+    else:
+
+        cursor.execute(
+            """
+            SELECT id, username
+            FROM users
+            WHERE id = ?
+            """,
+            (user_id,)
+        )
 
     user = cursor.fetchone()
 
+    cursor.close()
     connection.close()
 
     if user:
@@ -95,68 +148,222 @@ def load_user(user_id):
 # DATABASE
 # =========================================================
 
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+SQLITE_DATABASE = "chatbot.db"
+
+
+def using_postgres():
+
+    return bool(DATABASE_URL)
+
+
+def get_db():
+
+    if using_postgres():
+
+        import psycopg2
+
+        database_url = DATABASE_URL
+
+        # Some providers use postgres://.
+        # psycopg2 expects postgresql://.
+        if database_url.startswith("postgres://"):
+
+            database_url = database_url.replace(
+                "postgres://",
+                "postgresql://",
+                1
+            )
+
+        return psycopg2.connect(
+            database_url
+        )
+
+    connection = sqlite3.connect(
+        SQLITE_DATABASE
+    )
+
+    connection.row_factory = sqlite3.Row
+
+    return connection
+
+
 def init_database():
 
-    connection = sqlite3.connect(DATABASE)
-
+    connection = get_db()
     cursor = connection.cursor()
 
-    # Users
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
+    if using_postgres():
 
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            username TEXT UNIQUE NOT NULL,
-
-            password TEXT NOT NULL,
-
-            created_at TEXT NOT NULL
-
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
         )
-        """
-    )
 
-    # Chat messages
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS chats (
-
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            user_id INTEGER NOT NULL,
-
-            message TEXT NOT NULL,
-
-            response TEXT NOT NULL,
-
-            timestamp TEXT NOT NULL,
-
-            FOREIGN KEY (user_id)
-            REFERENCES users(id)
-
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chats (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                response TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY (user_id)
+                    REFERENCES users(id)
+                    ON DELETE CASCADE
+            )
+            """
         )
-        """
-    )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            chats_user_id_idx
+            ON chats(user_id)
+            """
+        )
+
+    else:
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                response TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY (user_id)
+                    REFERENCES users(id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            chats_user_id_idx
+            ON chats(user_id)
+            """
+        )
 
     connection.commit()
 
+    cursor.close()
     connection.close()
+
+
+# =========================================================
+# CSRF PROTECTION
+# =========================================================
+
+def get_csrf_token():
+
+    if "csrf_token" not in session:
+
+        session["csrf_token"] = secrets.token_urlsafe(32)
+
+    return session["csrf_token"]
+
+
+@app.context_processor
+def inject_csrf_token():
+
+    return {
+        "csrf_token": get_csrf_token()
+    }
+
+
+def validate_csrf():
+
+    token = request.form.get(
+        "csrf_token"
+    )
+
+    if not token:
+
+        token = request.headers.get(
+            "X-CSRF-Token"
+        )
+
+    stored_token = session.get(
+        "csrf_token"
+    )
+
+    if not token or not stored_token:
+
+        return False
+
+    return secrets.compare_digest(
+        token,
+        stored_token
+    )
+
+
+# =========================================================
+# AI CLIENT
+# =========================================================
+
+hackclub_api_key = os.environ.get(
+    "HACKCLUB_API_KEY"
+)
+
+if not hackclub_api_key:
+
+    raise RuntimeError(
+        "HACKCLUB_API_KEY is not configured."
+    )
+
+
+client = OpenAI(
+    api_key=hackclub_api_key,
+    base_url="https://ai.hackclub.com/proxy/v1"
+)
 
 
 # =========================================================
 # SIGNUP
 # =========================================================
 
-@app.route("/signup", methods=["GET", "POST"])
+@app.route(
+    "/signup",
+    methods=["GET", "POST"]
+)
+@limiter.limit("10 per minute")
 def signup():
 
-    # Already logged in
     if current_user.is_authenticated:
-        return redirect(url_for("home"))
+
+        return redirect(
+            url_for("home")
+        )
+
+    error = None
 
     if request.method == "POST":
+
+        if not validate_csrf():
+
+            return "Invalid security token.", 400
 
         username = request.form.get(
             "username",
@@ -168,83 +375,149 @@ def signup():
             ""
         )
 
-        # Validation
         if not username or not password:
 
-            return "Username and password are required."
-
-        if len(username) < 3:
-
-            return "Username must be at least 3 characters."
-
-        if len(password) < 6:
-
-            return "Password must be at least 6 characters."
-
-        # Hash password
-        hashed_password = generate_password_hash(
-            password
-        )
-
-        connection = sqlite3.connect(DATABASE)
-
-        cursor = connection.cursor()
-
-        try:
-
-            cursor.execute(
-                """
-                INSERT INTO users
-                (
-                    username,
-                    password,
-                    created_at
-                )
-                VALUES (?, ?, ?)
-                """,
-                (
-                    username,
-                    hashed_password,
-                    datetime.now().isoformat()
-                )
+            error = (
+                "Username and password are required."
             )
 
-            connection.commit()
+        elif len(username) < 3:
 
-            user_id = cursor.lastrowid
+            error = (
+                "Username must be at least "
+                "3 characters."
+            )
 
-        except sqlite3.IntegrityError:
+        elif len(username) > 30:
 
-            connection.close()
+            error = (
+                "Username must be 30 characters "
+                "or fewer."
+            )
 
-            return "That username already exists."
+        elif len(password) < 8:
 
-        connection.close()
+            error = (
+                "Password must be at least "
+                "8 characters."
+            )
 
-        # Automatically log user in
-        user = User(
-            user_id,
-            username
-        )
+        else:
 
-        login_user(user)
+            hashed_password = (
+                generate_password_hash(password)
+            )
 
-        return redirect(url_for("home"))
+            connection = get_db()
+            cursor = connection.cursor()
 
-    return render_template("signup.html")
+            try:
+
+                if using_postgres():
+
+                    cursor.execute(
+                        """
+                        INSERT INTO users
+                        (
+                            username,
+                            password,
+                            created_at
+                        )
+                        VALUES (%s, %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            username,
+                            hashed_password,
+                            datetime.utcnow().isoformat()
+                        )
+                    )
+
+                    user_id = cursor.fetchone()[0]
+
+                else:
+
+                    cursor.execute(
+                        """
+                        INSERT INTO users
+                        (
+                            username,
+                            password,
+                            created_at
+                        )
+                        VALUES (?, ?, ?)
+                        """,
+                        (
+                            username,
+                            hashed_password,
+                            datetime.utcnow().isoformat()
+                        )
+                    )
+
+                    user_id = cursor.lastrowid
+
+                connection.commit()
+
+                cursor.close()
+                connection.close()
+
+                user = User(
+                    user_id,
+                    username
+                )
+
+                login_user(user)
+
+                return redirect(
+                    url_for("home")
+                )
+
+            except Exception as error_message:
+
+                connection.rollback()
+
+                cursor.close()
+                connection.close()
+
+                print(
+                    "SIGNUP ERROR:",
+                    error_message
+                )
+
+                error = (
+                    "That username already exists."
+                )
+
+    return render_template(
+        "signup.html",
+        error=error
+    )
 
 
 # =========================================================
 # LOGIN
 # =========================================================
 
-@app.route("/login", methods=["GET", "POST"])
+@app.route(
+    "/login",
+    methods=["GET", "POST"]
+)
+@limiter.limit("10 per minute")
 def login():
 
     if current_user.is_authenticated:
-        return redirect(url_for("home"))
+
+        return redirect(
+            url_for("home")
+        )
+
+    error = None
 
     if request.method == "POST":
+
+        if not validate_csrf():
+
+            return "Invalid security token.", 400
 
         username = request.form.get(
             "username",
@@ -256,35 +529,48 @@ def login():
             ""
         )
 
-        connection = sqlite3.connect(DATABASE)
-
+        connection = get_db()
         cursor = connection.cursor()
 
-        cursor.execute(
-            """
-            SELECT
-                id,
-                username,
-                password
-            FROM users
-            WHERE username = ?
-            """,
-            (username,)
-        )
+        if using_postgres():
+
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    username,
+                    password
+                FROM users
+                WHERE username = %s
+                """,
+                (username,)
+            )
+
+        else:
+
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    username,
+                    password
+                FROM users
+                WHERE username = ?
+                """,
+                (username,)
+            )
 
         user_data = cursor.fetchone()
 
+        cursor.close()
         connection.close()
 
         if user_data:
 
             user_id = user_data[0]
-
             stored_username = user_data[1]
-
             stored_password = user_data[2]
 
-            # Check password
             if check_password_hash(
                 stored_password,
                 password
@@ -301,9 +587,14 @@ def login():
                     url_for("home")
                 )
 
-        return "Invalid username or password."
+        error = (
+            "Incorrect username or password."
+        )
 
-    return render_template("login.html")
+    return render_template(
+        "login.html",
+        error=error
+    )
 
 
 # =========================================================
@@ -322,7 +613,7 @@ def logout():
 
 
 # =========================================================
-# CHATBOT HOME
+# HOME
 # =========================================================
 
 @app.route("/")
@@ -337,14 +628,32 @@ def home():
 
 
 # =========================================================
-# SEND MESSAGE
+# CHAT
 # =========================================================
 
-@app.route("/chat", methods=["POST"])
+@app.route(
+    "/chat",
+    methods=["POST"]
+)
 @login_required
+@limiter.limit("20 per minute")
 def chat():
 
-    data = request.get_json()
+    if not validate_csrf():
+
+        return jsonify({
+            "error": "Invalid security token."
+        }), 400
+
+    data = request.get_json(
+        silent=True
+    )
+
+    if not data:
+
+        return jsonify({
+            "error": "Invalid request."
+        }), 400
 
     message = data.get(
         "message",
@@ -357,9 +666,17 @@ def chat():
             "error": "Message is empty."
         }), 400
 
+    if len(message) > 10000:
+
+        return jsonify({
+            "error": (
+                "Message is too long. "
+                "Maximum is 10,000 characters."
+            )
+        }), 400
+
     try:
 
-        # Ask AI
         response = client.chat.completions.create(
 
             model="openai/gpt-4o-mini",
@@ -367,8 +684,10 @@ def chat():
             messages=[
                 {
                     "role": "system",
-                    "content":
-                    "You are a helpful, friendly AI assistant."
+                    "content": (
+                        "You are a helpful, friendly "
+                        "AI assistant."
+                    )
                 },
                 {
                     "role": "user",
@@ -377,37 +696,66 @@ def chat():
             ]
         )
 
-        reply = response.choices[0].message.content
+        reply = (
+            response.choices[0]
+            .message
+            .content
+        )
 
-        # =================================================
-        # SAVE CHAT
-        # =================================================
+        if not reply:
 
-        connection = sqlite3.connect(DATABASE)
+            reply = (
+                "I couldn't generate a response."
+            )
 
+        connection = get_db()
         cursor = connection.cursor()
 
-        cursor.execute(
-            """
-            INSERT INTO chats
-            (
-                user_id,
-                message,
-                response,
-                timestamp
+        if using_postgres():
+
+            cursor.execute(
+                """
+                INSERT INTO chats
+                (
+                    user_id,
+                    message,
+                    response,
+                    timestamp
+                )
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    current_user.id,
+                    message,
+                    reply,
+                    datetime.utcnow().isoformat()
+                )
             )
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                current_user.id,
-                message,
-                reply,
-                datetime.now().isoformat()
+
+        else:
+
+            cursor.execute(
+                """
+                INSERT INTO chats
+                (
+                    user_id,
+                    message,
+                    response,
+                    timestamp
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    current_user.id,
+                    message,
+                    reply,
+                    datetime.utcnow().isoformat()
+                )
             )
-        )
 
         connection.commit()
 
+        cursor.close()
         connection.close()
 
         return jsonify({
@@ -416,10 +764,16 @@ def chat():
 
     except Exception as error:
 
-        print("AI ERROR:", error)
+        print(
+            "AI ERROR:",
+            error
+        )
 
         return jsonify({
-            "error": "The AI request failed."
+            "error": (
+                "The AI request failed. "
+                "Please try again."
+            )
         }), 500
 
 
@@ -431,25 +785,42 @@ def chat():
 @login_required
 def history():
 
-    connection = sqlite3.connect(DATABASE)
-
+    connection = get_db()
     cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT
-            message,
-            response,
-            timestamp
-        FROM chats
-        WHERE user_id = ?
-        ORDER BY id ASC
-        """,
-        (current_user.id,)
-    )
+    if using_postgres():
+
+        cursor.execute(
+            """
+            SELECT
+                message,
+                response,
+                timestamp
+            FROM chats
+            WHERE user_id = %s
+            ORDER BY id ASC
+            """,
+            (current_user.id,)
+        )
+
+    else:
+
+        cursor.execute(
+            """
+            SELECT
+                message,
+                response,
+                timestamp
+            FROM chats
+            WHERE user_id = ?
+            ORDER BY id ASC
+            """,
+            (current_user.id,)
+        )
 
     chats = cursor.fetchall()
 
+    cursor.close()
     connection.close()
 
     history_data = []
@@ -457,43 +828,81 @@ def history():
     for chat in chats:
 
         history_data.append({
-
             "message": chat[0],
-
             "response": chat[1],
-
             "timestamp": chat[2]
-
         })
 
     return jsonify(history_data)
 
 
 # =========================================================
-# START SERVER
+# HEALTH CHECK
+# =========================================================
+
+@app.route("/health")
+def health():
+
+    return jsonify({
+        "status": "ok"
+    })
+
+
+# =========================================================
+# ERROR HANDLERS
+# =========================================================
+
+@app.errorhandler(429)
+def rate_limit_error(error):
+
+    return jsonify({
+        "error": (
+            "Too many requests. "
+            "Please try again later."
+        )
+    }), 429
+
+
+# =========================================================
+# DATABASE INITIALIZATION
+# =========================================================
+
+init_database()
+
+
+# =========================================================
+# LOCAL DEVELOPMENT
 # =========================================================
 
 if __name__ == "__main__":
 
-    init_database()
+    port = int(
+        os.environ.get(
+            "PORT",
+            5000
+        )
+    )
+
+    debug = (
+        os.environ.get(
+            "FLASK_DEBUG",
+            "false"
+        ).lower()
+        == "true"
+    )
 
     print()
     print("===================================")
-    print("        MY BOT IS RUNNING")
+    print("          SLOPBOT IS RUNNING")
     print("===================================")
     print()
-    print("Open:")
-    print("http://127.0.0.1:5000")
-    print()
-    print("Signup:")
-    print("http://127.0.0.1:5000/signup")
-    print()
-    print("Login:")
-    print("http://127.0.0.1:5000/login")
+    print(
+        f"http://127.0.0.1:{port}"
+    )
     print()
 
     app.run(
         host="0.0.0.0",
-        port=5000,
-        debug=True
+        port=port,
+        debug=debug
     )
